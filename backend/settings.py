@@ -32,14 +32,7 @@ if not SECRET_KEY:
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DEBUG', 'False').lower() == 'true'
 
-ALLOWED_HOSTS = [
-    'localhost',
-    '127.0.0.1',
-    'maws-front.vercel.app',  # 프론트엔드 도메인
-    '.vercel.app',  # Vercel 서브도메인들
-    '.railway.app',  # Railway 서브도메인들 (백엔드 배포 시)
-    '.herokuapp.com',  # Heroku 서브도메인들 (백엔드 배포 시)
-]
+ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
 
 # Application definition
