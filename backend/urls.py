@@ -16,8 +16,24 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+import logging
+
+@csrf_exempt
+def log_error(request):
+    if request.method == 'POST':
+        import json
+        data = json.loads(request.body)
+        print('FRONT ERROR:', data)  # 터미널에 출력
+        logging.error(f"FRONT ERROR: {data}")
+        return JsonResponse({'status': 'ok'})
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('api/log-error/', log_error),
+    path('api/accounts/', include('accounts.urls')),
     path('api/', include('api.urls')),
+    path('api/', include('clients.urls')),
+    path('api/', include('artworks.urls')),
 ]

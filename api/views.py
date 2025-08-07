@@ -1,149 +1,123 @@
-from django.shortcuts import render
-from rest_framework import generics, viewsets
-from .models import Client, Artwork, ClientColumn
-from .serializers import ClientSerializer, ArtworkSerializer, ClientColumnSerializer
-from django.conf import settings
-import boto3
+from rest_framework import viewsets
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
-
-# Create your views here.
-
-class ClientListView(generics.ListAPIView):
-    queryset = Client.objects.all()
-    serializer_class = ClientSerializer
-
-class ClientDetailView(generics.RetrieveAPIView):
-    queryset = Client.objects.all()
-    serializer_class = ClientSerializer
-
-class ClientCreateView(generics.CreateAPIView):
-    queryset = Client.objects.all()
-    serializer_class = ClientSerializer
-
-class ClientUpdateView(generics.UpdateAPIView):
-    queryset = Client.objects.all()
-    serializer_class = ClientSerializer
-
-class ClientDeleteView(generics.DestroyAPIView):
-    queryset = Client.objects.all()
-    serializer_class = ClientSerializer
-
-# Artwork API (ModelViewSet으로 통합)
-class ArtworkViewSet(viewsets.ModelViewSet):
-    queryset = Artwork.objects.all()
-    serializer_class = ArtworkSerializer
-
-    def create(self, request, *args, **kwargs):
-        data = request.data.copy()
-        file = request.FILES.get('image')
-        if file:
-            s3_client = boto3.client(
-                's3',
-                aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-                aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-                region_name=settings.AWS_S3_REGION_NAME,
-            )
-            s3_key = f"artworks/{file.name}"
-            s3_client.upload_fileobj(
-                file,
-                settings.AWS_STORAGE_BUCKET_NAME,
-                s3_key,
-                ExtraArgs={
-                    'ContentType': file.content_type
-                }
-            )
-            file_url = f"https://{settings.AWS_STORAGE_BUCKET_NAME}.s3.{settings.AWS_S3_REGION_NAME}.amazonaws.com/{s3_key}"
-            data['image'] = file_url
-        serializer = self.get_serializer(data=data)
-        serializer.is_valid(raise_exception=True)
-        self.perform_create(serializer)
-        headers = self.get_success_headers(serializer.data)
-        return Response(serializer.data, status=201, headers=headers)
-
-    def update(self, request, *args, **kwargs):
-        partial = kwargs.pop('partial', False)
-        instance = self.get_object()
-        data = request.data.copy()
-        file = request.FILES.get('image')
-        if file:
-            s3_client = boto3.client(
-                's3',
-                aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-                aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-                region_name=settings.AWS_S3_REGION_NAME,
-            )
-            s3_key = f"artworks/{file.name}"
-            s3_client.upload_fileobj(
-                file,
-                settings.AWS_STORAGE_BUCKET_NAME,
-                s3_key,
-                ExtraArgs={
-                    'ContentType': file.content_type
-                }
-            )
-            file_url = f"https://{settings.AWS_STORAGE_BUCKET_NAME}.s3.{settings.AWS_S3_REGION_NAME}.amazonaws.com/{s3_key}"
-            data['image'] = file_url
-        else:
-            # 파일이 없으면 기존 image URL 유지
-            data['image'] = instance.image
-        serializer = self.get_serializer(instance, data=data, partial=partial)
-        serializer.is_valid(raise_exception=True)
-        self.perform_update(serializer)
-        return Response(serializer.data)
-
-class S3PresignedUrlView(APIView):
-    # permission_classes = [IsAuthenticated]  # 임시로 인증 제거
-
-    def post(self, request):
-        file_name = request.data.get('file_name')
-        file_type = request.data.get('file_type', 'image/jpeg')
-        if not file_name:
-            return Response({'error': 'file_name is required'}, status=400)
-
-        s3_client = boto3.client(
-            's3',
-            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-            region_name=settings.AWS_S3_REGION_NAME,
-        )
-
-        presigned_url = s3_client.generate_presigned_url(
-            'put_object',
-            Params={
-                'Bucket': settings.AWS_STORAGE_BUCKET_NAME,
-                'Key': file_name,
-                'ContentType': file_type,
-            },
-            ExpiresIn=300  # 5분간 유효
-        )
-
-        file_url = f"https://{settings.AWS_STORAGE_BUCKET_NAME}.s3.{settings.AWS_S3_REGION_NAME}.amazonaws.com/{file_name}"
-
-        return Response({
-            'presigned_url': presigned_url,
-            'file_url': file_url,
-        })
+from .models import ClientColumn
+from clients.models import Client, Tag
+from .serializers import ClientColumnSerializer, ClientSerializer, TagSerializer
 
 class ClientColumnViewSet(viewsets.ModelViewSet):
-    queryset = ClientColumn.objects.all().order_by('order')
+    queryset = ClientColumn.objects.all().order_by('order', 'id')
     serializer_class = ClientColumnSerializer
+    pagination_class = None  # 페이지네이션 비활성화 - 모든 컬럼을 한번에 가져오기
+    http_method_names = ['get', 'post', 'put', 'patch', 'delete', 'head', 'options']  # PATCH 명시적 허용
+    
+    def update(self, request, *args, **kwargs):
+        """컬럼 수정 시 데이터 마이그레이션 포함"""
+        print(f"🔧 컬럼 수정 요청 시작: {kwargs}")
+        print(f"🔧 수정할 데이터: {request.data}")
+        
+        try:
+            instance = self.get_object()
+            old_accessor = instance.accessor
+            print(f"🔧 수정할 컬럼 찾음: {instance.header} (ID: {instance.id})")
+            print(f"🔧 기존 데이터: header={instance.header}, accessor={old_accessor}, type={instance.type}")
+            
+            # 새로운 accessor 값 확인
+            new_accessor = request.data.get('accessor')
+            
+            # accessor가 변경되는 경우 클라이언트 데이터 마이그레이션
+            if new_accessor and new_accessor != old_accessor:
+                print(f"🔄 accessor 변경 감지: {old_accessor} → {new_accessor}")
+                print(f"🔄 클라이언트 데이터 마이그레이션 시작...")
+                
+                # 모든 클라이언트의 data 필드에서 키 변경
+                from clients.models import Client
+                clients = Client.objects.all()
+                updated_count = 0
+                
+                for client in clients:
+                    if client.data and old_accessor in client.data:
+                        # 기존 값 백업
+                        old_value = client.data[old_accessor]
+                        
+                        # 새 키로 값 복사
+                        client.data[new_accessor] = old_value
+                        
+                        # 기존 키 제거
+                        del client.data[old_accessor]
+                        
+                        # 저장
+                        client.save(update_fields=['data'])
+                        updated_count += 1
+                        
+                        print(f"🔄 클라이언트 {client.id}({client.name}) 데이터 마이그레이션: {old_accessor} → {new_accessor}")
+                
+                print(f"✅ 데이터 마이그레이션 완료: {updated_count}개 클라이언트 업데이트")
+            
+            # 컬럼 수정 수행
+            result = super().update(request, *args, **kwargs)
+            
+            # 업데이트된 인스턴스 다시 로드
+            instance.refresh_from_db()
+            print(f"🔧 컬럼 수정 완료: {instance.header} (ID: {instance.id})")
+            print(f"🔧 수정된 데이터: header={instance.header}, accessor={instance.accessor}, type={instance.type}")
+            
+            return result
+        except Exception as e:
+            print(f"❌ 컬럼 수정 실패: {e}")
+            print(f"❌ 에러 상세: {type(e).__name__}: {str(e)}")
+            raise
+    
+    def destroy(self, request, *args, **kwargs):
+        """컬럼 삭제 시 더 확실한 처리"""
+        try:
+            print(f"🗑️ 컬럼 삭제 요청 시작: {kwargs}")
+            
+            instance = self.get_object()
+            column_id = instance.id
+            column_header = instance.header
+            
+            print(f"🗑️ 삭제할 컬럼 찾음: {column_header} (ID: {column_id})")
+            
+            # 실제 삭제 수행
+            instance.delete()
+            
+            print(f"🗑️ 컬럼 삭제 완료: {column_header} (ID: {column_id})")
+            
+            return Response({
+                'message': f'컬럼 "{column_header}"이(가) 삭제되었습니다.',
+                'deleted_id': column_id,
+                'deleted_header': column_header,
+                'success': True
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            print(f"❌ 컬럼 삭제 실패: {e}")
+            print(f"❌ 에러 상세: {type(e).__name__}: {str(e)}")
+            return Response({
+                'error': f'컬럼 삭제 실패: {str(e)}',
+                'success': False
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-class SyncClientColumnsAPIView(APIView):
+class ClientColumnSyncView(APIView):
     def post(self, request):
-        columns = request.data.get('columns', [])
-        created_or_updated = []
-        for idx, col in enumerate(columns):
-            accessor = col.get('accessor')
-            header = col.get('header')
-            col_type = col.get('type', 'text')
-            if not accessor or not header:
-                continue
-            obj, created = ClientColumn.objects.update_or_create(
-                accessor=accessor,
-                defaults={'header': header, 'type': col_type, 'order': idx}
-            )
-            created_or_updated.append(ClientColumnSerializer(obj).data)
-        return Response({'columns': created_or_updated}, status=status.HTTP_200_OK)
+        columns = request.data
+        if not isinstance(columns, list):
+            return Response({'detail': '컬럼 배열을 보내야 합니다.'}, status=400)
+        # 기존 컬럼 전체 삭제(옵션)
+        ClientColumn.objects.all().delete()
+        # bulk create
+        objs = [ClientColumn(**col) for col in columns]
+        ClientColumn.objects.bulk_create(objs)
+        return Response({'status': 'ok', 'count': len(objs)}, status=status.HTTP_201_CREATED)
+
+
+class TagViewSet(viewsets.ModelViewSet):
+    queryset = Tag.objects.all().order_by('name')
+    serializer_class = TagSerializer
+
+
+class ClientViewSet(viewsets.ModelViewSet):
+    queryset = Client.objects.all().order_by('-created_at')
+    serializer_class = ClientSerializer

@@ -1,30 +1,39 @@
 from rest_framework import serializers
-from .models import Client, ClientStatus, Artwork, ClientColumn
-
-class ClientStatusSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = ClientStatus
-        fields = '__all__'
-
-class ClientSerializer(serializers.ModelSerializer):
-    status = ClientStatusSerializer(many=True, read_only=True)
-    class Meta:
-        model = Client
-        fields = '__all__'
-
-class ArtworkSerializer(serializers.ModelSerializer):
-    buyer = serializers.PrimaryKeyRelatedField(queryset=Client.objects.all(), allow_null=True, required=False)
-    buyer_detail = ClientSerializer(source='buyer', read_only=True)
-    class Meta:
-        model = Artwork
-        fields = '__all__'
-        extra_kwargs = {field: {'required': False, 'allow_null': True} for field in fields}
-    def to_representation(self, instance):
-        rep = super().to_representation(instance)
-        rep['buyer_detail'] = ClientSerializer(instance.buyer).data if instance.buyer else None
-        return rep 
+from .models import ClientColumn
+from clients.models import Client, Tag
 
 class ClientColumnSerializer(serializers.ModelSerializer):
     class Meta:
         model = ClientColumn
-        fields = '__all__' 
+        fields = '__all__'
+
+
+class TagSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Tag
+        fields = ['id', 'name', 'color', 'created_at', 'updated_at']
+
+
+class ClientSerializer(serializers.ModelSerializer):
+    tags = TagSerializer(many=True, read_only=True)
+    tag_ids = serializers.ListField(child=serializers.IntegerField(), write_only=True, required=False)
+    
+    class Meta:
+        model = Client
+        fields = ['id', 'name', 'phone', 'tags', 'tag_ids', 'data', 'created_at', 'updated_at']
+    
+    def create(self, validated_data):
+        tag_ids = validated_data.pop('tag_ids', [])
+        client = Client.objects.create(**validated_data)
+        if tag_ids:
+            client.tags.set(tag_ids)
+        return client
+    
+    def update(self, instance, validated_data):
+        tag_ids = validated_data.pop('tag_ids', None)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        if tag_ids is not None:
+            instance.tags.set(tag_ids)
+        return instance 

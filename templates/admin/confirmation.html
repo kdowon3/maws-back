@@ -1,0 +1,52 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block title %}{{ title }} | {{ site_title|default:_('Django site admin') }}{% endblock %}
+
+{% block content %}
+<div class="module">
+    <div class="form-row">
+        <h1 style="color: #dc3545; margin-bottom: 20px;">
+            {{ title }}
+        </h1>
+        
+        <div style="background-color: #f8d7da; border: 1px solid #f5c6cb; border-radius: 4px; padding: 15px; margin-bottom: 20px;">
+            <p style="margin: 0; font-weight: bold; color: #721c24;">
+                {{ warning }}
+            </p>
+        </div>
+        
+        <p style="font-size: 16px; margin-bottom: 20px;">
+            {{ message }}
+        </p>
+        
+        <div style="background-color: #e2e3e5; padding: 10px; border-radius: 4px; margin-bottom: 20px;">
+            <strong>현재 데이터 개수: {{ total_count }}개</strong>
+        </div>
+        
+        <form method="post" style="display: inline;">
+            {% csrf_token %}
+            <input type="hidden" name="confirmed" value="true">
+            <input type="hidden" name="action" value="{{ action }}">
+            
+            <button type="submit" 
+                    style="background-color: #dc3545; color: white; border: none; padding: 10px 20px; border-radius: 4px; margin-right: 10px; cursor: pointer; font-size: 14px;">
+                ⚠️ 확인 - 모든 데이터 삭제
+            </button>
+        </form>
+        
+        <a href="javascript:history.back()" 
+           style="background-color: #6c757d; color: white; text-decoration: none; padding: 10px 20px; border-radius: 4px; font-size: 14px;">
+            취소
+        </a>
+    </div>
+</div>
+
+<script>
+document.querySelector('button[type="submit"]').addEventListener('click', function(e) {
+    if (!confirm('정말로 실행하시겠습니까? 이 작업은 되돌릴 수 없습니다!')) {
+        e.preventDefault();
+    }
+});
+</script>
+{% endblock %}

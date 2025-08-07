@@ -1,7 +1,10 @@
 from django.contrib import admin
-from .models import ClientStatus, Client, Artwork, ClientColumn
+from .models import ClientColumn
 
-admin.site.register(ClientStatus)
-admin.site.register(Client)
-admin.site.register(Artwork)
-admin.site.register(ClientColumn)
+class ClientColumnAdmin(admin.ModelAdmin):
+    list_display = ['id', 'header', 'accessor', 'type', 'order']
+    list_filter = ['type']
+    search_fields = ['header', 'accessor']
+    ordering = ['order', 'id']
+
+admin.site.register(ClientColumn, ClientColumnAdmin)
