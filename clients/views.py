@@ -1,11 +1,11 @@
 from django.shortcuts import render
-from rest_framework import generics
+from rest_framework import generics, permissions
 from .models import Client, Tag
 from .serializers import DynamicClientSerializer, TagSerializer
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
 from django.db.models import Q
 from .column_mapper import normalize_columns, map_excel_data
 import pandas as pd
@@ -17,16 +17,46 @@ from django.core.files.uploadedfile import InMemoryUploadedFile
 # Create your views here.
 
 class DynamicClientListCreateView(generics.ListCreateAPIView):
-    queryset = Client.objects.all()
     serializer_class = DynamicClientSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        user = getattr(self.request, 'user', None)
+        if user and getattr(user, 'gallery_id', None):
+            return Client.objects.filter(gallery_id=user.gallery_id).prefetch_related('tags')
+        return Client.objects.none()
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
+    
+    def create(self, request, *args, **kwargs):
+        print(f"🚀 [CLIENT CREATE DEBUG] 호출됨!")
+        print(f"[CLIENT CREATE DEBUG] User: {request.user}")
+        print(f"[CLIENT CREATE DEBUG] User gallery_id: {getattr(request.user, 'gallery_id', None)}")
+        print(f"[CLIENT CREATE DEBUG] Request data: {request.data}")
+        return super().create(request, *args, **kwargs)
 
 class DynamicClientRetrieveUpdateView(generics.RetrieveUpdateDestroyAPIView):
-    queryset = Client.objects.all()
     serializer_class = DynamicClientSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        user = getattr(self.request, 'user', None)
+        if user and getattr(user, 'gallery_id', None):
+            return Client.objects.filter(gallery_id=user.gallery_id).prefetch_related('tags')
+        return Client.objects.none()
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
 
 
 # 기존 태그 API들 - ManyToMany 모델에 맞게 수정
 @api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
 def filter_clients_by_tag(request):
     """태그로 고객을 필터링합니다."""
     tag_ids = request.GET.getlist('tag_ids[]') or request.GET.getlist('tag_ids')
@@ -34,8 +64,12 @@ def filter_clients_by_tag(request):
     if not tag_ids:
         return Response({'error': '태그를 지정해주세요.'}, status=status.HTTP_400_BAD_REQUEST)
     
-    # 태그 중 하나라도 포함하는 고객 찾기 (OR 조건)
-    clients = Client.objects.filter(tags__id__in=tag_ids).distinct()
+    # 태그 중 하나라도 포함하는 고객 찾기 (OR 조건) + 갤러리 스코프
+    user = getattr(request, 'user', None)
+    clients_qs = Client.objects.filter(tags__id__in=tag_ids)
+    if user and getattr(user, 'gallery_id', None):
+        clients_qs = clients_qs.filter(gallery_id=user.gallery_id)
+    clients = clients_qs.distinct()
     
     serializer = DynamicClientSerializer(clients, many=True)
     return Response(serializer.data)
@@ -44,17 +78,33 @@ def filter_clients_by_tag(request):
 # Tag CRUD API
 class TagListCreateView(generics.ListCreateAPIView):
     """태그 목록 조회 및 생성"""
-    queryset = Tag.objects.all()
     serializer_class = TagSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        user = getattr(self.request, 'user', None)
+        if user and getattr(user, 'gallery_id', None):
+            return Tag.objects.filter(gallery_id=user.gallery_id)
+        return Tag.objects.none()
+
+    def perform_create(self, serializer):
+        serializer.save(gallery=self.request.user.gallery)
 
 
 class TagRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
     """태그 상세 조회, 수정, 삭제"""
-    queryset = Tag.objects.all()
     serializer_class = TagSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        user = getattr(self.request, 'user', None)
+        if user and getattr(user, 'gallery_id', None):
+            return Tag.objects.filter(gallery_id=user.gallery_id)
+        return Tag.objects.none()
 
 
 @api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
 def create_tag_if_not_exists(request):
     """태그가 없으면 생성하고 있으면 기존 태그 반환"""
     name = request.data.get('name', '').strip()
@@ -77,6 +127,7 @@ def create_tag_if_not_exists(request):
 
 # 새로운 컬럼 매핑 API
 @api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
 def analyze_excel_headers(request):
     """
     엑셀 헤더를 분석하여 자동 매핑 정보 반환
@@ -103,6 +154,7 @@ def analyze_excel_headers(request):
 
 
 @api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
 def process_excel_data(request):
     """
     엑셀 데이터를 처리하여 매핑된 형태로 반환
@@ -131,6 +183,7 @@ def process_excel_data(request):
 
 
 @api_view(['PATCH'])
+@permission_classes([permissions.IsAuthenticated])
 def update_client_tags_only(request, client_id):
     """
     클라이언트의 태그만 업데이트 (다른 데이터는 보존)
@@ -153,6 +206,8 @@ def update_client_tags_only(request, client_id):
         # 태그만 업데이트 (다른 필드는 건드리지 않음)
         if tag_ids:
             tags = Tag.objects.filter(id__in=tag_ids)
+            if getattr(request.user, 'gallery_id', None):
+                tags = tags.filter(gallery_id=request.user.gallery_id)
             print(f"🏷️ 설정할 태그: {[tag.name for tag in tags]}")
             print(f"🏷️ 설정할 태그 ID들: {[tag.id for tag in tags]}")
             client.tags.set(tags)
@@ -186,6 +241,7 @@ def update_client_tags_only(request, client_id):
 
 
 @api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
 def process_excel_file_pandas_with_mapping(request):
     """
     pandas를 사용한 엑셀 파일 처리 (컬럼 매핑 정보 포함)
@@ -330,7 +386,11 @@ def process_excel_file_pandas_with_mapping(request):
                 print(f"📝 클라이언트 생성: {client_name} ({client_phone}) - 데이터 필드 {len(clean_client_data)}개")
                 print(f"📝 데이터 필드 내용: {clean_client_data}")
                 
+                print(f"[EXCEL CREATE DEBUG] User: {request.user}")
+                print(f"[EXCEL CREATE DEBUG] User gallery: {getattr(request.user, 'gallery', None)}")
+                print(f"[EXCEL CREATE DEBUG] User gallery_id: {getattr(request.user, 'gallery_id', None)}")
                 client = Client.objects.create(
+                    gallery=getattr(request.user, 'gallery', None),
                     name=client_name,
                     phone=client_phone,
                     data=clean_client_data
@@ -340,6 +400,7 @@ def process_excel_file_pandas_with_mapping(request):
                 if not client.tags.exists():
                     try:
                         default_tag, created = Tag.objects.get_or_create(
+                            gallery=getattr(request.user, 'gallery', None),
                             name='일반고객',
                             defaults={'color': '#6B7280'}
                         )
@@ -402,6 +463,7 @@ def process_excel_file_pandas_with_mapping(request):
         return Response({'error': f'엑셀 처리 중 오류: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
 def process_excel_file_pandas(request):
     """
     pandas를 사용한 엑셀 파일 처리 (단순화된 로직)
@@ -542,10 +604,13 @@ def process_excel_file_pandas(request):
                 # 중복 확인 (이름 + 전화번호 기준)
                 existing_client = None
                 if client_data['name'] and client_data['phone']:
-                    existing_client = Client.objects.filter(
+                    existing_client_qs = Client.objects.filter(
                         name=client_data['name'],
                         phone=client_data['phone']
-                    ).first()
+                    )
+                    if getattr(request.user, 'gallery_id', None):
+                        existing_client_qs = existing_client_qs.filter(gallery_id=request.user.gallery_id)
+                    existing_client = existing_client_qs.first()
                 
                 if existing_client:
                     # 기존 데이터 업데이트
@@ -554,7 +619,10 @@ def process_excel_file_pandas(request):
                     success_count += 1
                 else:
                     # 새 데이터 생성
-                    Client.objects.create(**client_data)
+                    print(f"[PANDAS CREATE DEBUG] User: {request.user}")
+                    print(f"[PANDAS CREATE DEBUG] User gallery: {getattr(request.user, 'gallery', None)}")
+                    print(f"[PANDAS CREATE DEBUG] User gallery_id: {getattr(request.user, 'gallery_id', None)}")
+                    Client.objects.create(gallery=getattr(request.user, 'gallery', None), **client_data)
                     success_count += 1
                     
             except Exception as e:

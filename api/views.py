@@ -1,4 +1,4 @@
-from rest_framework import viewsets
+from rest_framework import viewsets, permissions
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -11,6 +11,19 @@ class ClientColumnViewSet(viewsets.ModelViewSet):
     serializer_class = ClientColumnSerializer
     pagination_class = None  # 페이지네이션 비활성화 - 모든 컬럼을 한번에 가져오기
     http_method_names = ['get', 'post', 'put', 'patch', 'delete', 'head', 'options']  # PATCH 명시적 허용
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_queryset(self):
+        """갤러리별 데이터 필터링 적용"""
+        user = getattr(self.request, 'user', None)
+        if user and getattr(user, 'gallery_id', None):
+            return ClientColumn.objects.filter(gallery_id=user.gallery_id).order_by('order', 'id')
+        return ClientColumn.objects.none()
+    
+    def perform_create(self, serializer):
+        """컬럼 생성 시 현재 사용자의 갤러리 자동 할당"""
+        gallery = getattr(self.request.user, 'gallery', None)
+        serializer.save(gallery=gallery)
     
     def update(self, request, *args, **kwargs):
         """컬럼 수정 시 데이터 마이그레이션 포함"""
@@ -31,9 +44,13 @@ class ClientColumnViewSet(viewsets.ModelViewSet):
                 print(f"🔄 accessor 변경 감지: {old_accessor} → {new_accessor}")
                 print(f"🔄 클라이언트 데이터 마이그레이션 시작...")
                 
-                # 모든 클라이언트의 data 필드에서 키 변경
+                # 현재 갤러리의 클라이언트만 대상으로 data 필드에서 키 변경
                 from clients.models import Client
-                clients = Client.objects.all()
+                user = getattr(self.request, 'user', None)
+                if user and getattr(user, 'gallery_id', None):
+                    clients = Client.objects.filter(gallery_id=user.gallery_id)
+                else:
+                    clients = Client.objects.none()
                 updated_count = 0
                 
                 for client in clients:
@@ -101,14 +118,27 @@ class ClientColumnViewSet(viewsets.ModelViewSet):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class ClientColumnSyncView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    
     def post(self, request):
         columns = request.data
         if not isinstance(columns, list):
             return Response({'detail': '컬럼 배열을 보내야 합니다.'}, status=400)
-        # 기존 컬럼 전체 삭제(옵션)
-        ClientColumn.objects.all().delete()
-        # bulk create
-        objs = [ClientColumn(**col) for col in columns]
+        
+        user = getattr(request, 'user', None)
+        gallery = getattr(user, 'gallery', None) if user else None
+        
+        if not gallery:
+            return Response({'detail': '갤러리 정보가 필요합니다.'}, status=400)
+        
+        # 현재 갤러리의 컬럼만 삭제
+        ClientColumn.objects.filter(gallery=gallery).delete()
+        
+        # bulk create with gallery
+        objs = []
+        for col in columns:
+            col['gallery'] = gallery
+            objs.append(ClientColumn(**col))
         ClientColumn.objects.bulk_create(objs)
         return Response({'status': 'ok', 'count': len(objs)}, status=status.HTTP_201_CREATED)
 
@@ -116,8 +146,24 @@ class ClientColumnSyncView(APIView):
 class TagViewSet(viewsets.ModelViewSet):
     queryset = Tag.objects.all().order_by('name')
     serializer_class = TagSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_queryset(self):
+        """갤러리별 데이터 필터링 적용"""
+        user = getattr(self.request, 'user', None)
+        if user and getattr(user, 'gallery_id', None):
+            return Tag.objects.filter(gallery_id=user.gallery_id).order_by('name')
+        return Tag.objects.none()
 
 
 class ClientViewSet(viewsets.ModelViewSet):
     queryset = Client.objects.all().order_by('-created_at')
     serializer_class = ClientSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_queryset(self):
+        """갤러리별 데이터 필터링 적용"""
+        user = getattr(self.request, 'user', None)
+        if user and getattr(user, 'gallery_id', None):
+            return Client.objects.filter(gallery_id=user.gallery_id).order_by('-created_at')
+        return Client.objects.none()

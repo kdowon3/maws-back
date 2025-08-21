@@ -5,8 +5,8 @@ from .views import ClientColumnSyncView
 
 router = DefaultRouter()
 router.register(r'client-columns', ClientColumnViewSet, basename='clientcolumn')
-router.register(r'clients', ClientViewSet, basename='client')
-router.register(r'tags', TagViewSet, basename='tag')
+router.register(r'legacy-clients', ClientViewSet, basename='legacy-client')  # 레거시 API
+router.register(r'legacy-tags', TagViewSet, basename='legacy-tag')  # 레거시 API
 
 urlpatterns = router.urls 
 urlpatterns += [

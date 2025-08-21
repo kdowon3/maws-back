@@ -18,6 +18,8 @@ from .views import (
     verify_phone_code,
     quick_signup,
     check_firebase_config,
+    send_email_verification,
+    verify_email_code,
 )
 
 app_name = 'accounts'
@@ -33,6 +35,10 @@ urlpatterns = [
     path('auth/quick-signup/', quick_signup, name='quick_signup'),
     path('auth/send-phone-verification/', send_phone_verification, name='send_phone_verification'),
     path('auth/verify-phone-code/', verify_phone_code, name='verify_phone_code'),
+    
+    # 이메일 인증 관련
+    path('auth/send-email-verification/', send_email_verification, name='send_email_verification'),
+    path('auth/verify-email-code/', verify_email_code, name='verify_email_code'),
     
     # 사용자 관리
     path('profile/', UserProfileView.as_view(), name='user_profile'),

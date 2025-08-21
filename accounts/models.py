@@ -5,6 +5,7 @@ from datetime import timedelta
 import secrets
 import string
 import re
+import uuid
 
 
 class Gallery(models.Model):
@@ -149,6 +150,10 @@ class User(AbstractUser):
     failed_login_attempts = models.PositiveIntegerField(default=0, verbose_name="로그인 실패 횟수")
     account_locked_until = models.DateTimeField(null=True, blank=True, verbose_name="계정 잠금 해제 시간")
     password_changed_at = models.DateTimeField(auto_now_add=True, verbose_name="비밀번호 변경일")
+    
+    # 이메일 인증
+    email_verified = models.BooleanField(default=False, verbose_name="이메일 인증 여부")
+    email_verified_at = models.DateTimeField(null=True, blank=True, verbose_name="이메일 인증 시간")
     
     # 개인 설정
     timezone_setting = models.CharField(max_length=50, default='Asia/Seoul', verbose_name="시간대")
@@ -326,4 +331,169 @@ class PhoneVerification(models.Model):
     @classmethod
     def clean_expired(cls):
         """만료된 인증 기록 정리"""
+        cls.objects.filter(expires_at__lt=timezone.now()).delete()
+
+
+class EmailVerification(models.Model):
+    """이메일 인증 관리"""
+    
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='email_verifications',
+        verbose_name="사용자",
+        null=True,
+        blank=True
+    )
+    email = models.EmailField(verbose_name="이메일 주소", default="")
+    code = models.CharField(max_length=6, verbose_name="인증 번호")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="생성 시간")
+    expires_at = models.DateTimeField(verbose_name="만료 시간")
+    used = models.BooleanField(default=False, verbose_name="사용 여부")
+    used_at = models.DateTimeField(null=True, blank=True, verbose_name="사용 시간")
+    attempts = models.PositiveIntegerField(default=0, verbose_name="시도 횟수")
+    
+    class Meta:
+        verbose_name = "이메일 인증"
+        verbose_name_plural = "이메일 인증"
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['code']),
+            models.Index(fields=['user', '-created_at']),
+            models.Index(fields=['expires_at']),
+        ]
+        unique_together = [['user', 'code']]  # 사용자별 인증번호 중복 방지
+    
+    def __str__(self):
+        return f"{self.user.email} - {self.code}"
+    
+    def is_expired(self):
+        """만료 여부 확인"""
+        return timezone.now() > self.expires_at
+    
+    def is_valid(self):
+        """유효성 확인 (만료되지 않고 사용되지 않은 인증번호)"""
+        return not self.used and not self.is_expired() and self.attempts < 5
+    
+    def mark_as_used(self):
+        """인증번호를 사용된 것으로 표시"""
+        self.used = True
+        self.used_at = timezone.now()
+        self.save(update_fields=['used', 'used_at'])
+    
+    def increment_attempts(self):
+        """시도 횟수 증가"""
+        self.attempts += 1
+        self.save(update_fields=['attempts'])
+    
+    @classmethod
+    def generate_code(cls):
+        """6자리 인증번호 생성"""
+        import random
+        return f"{random.randint(100000, 999999)}"
+    
+    @classmethod
+    def create_for_user(cls, user):
+        """사용자를 위한 이메일 인증번호 생성"""
+        # 기존 미사용 인증번호들을 만료시킴
+        cls.objects.filter(user=user, used=False).update(used=True, used_at=timezone.now())
+        
+        # 새 인증번호 생성 (5분 유효)
+        code = cls.generate_code()
+        expires_at = timezone.now() + timedelta(minutes=5)
+        
+        return cls.objects.create(
+            user=user,
+            email=user.email,
+            code=code,
+            expires_at=expires_at
+        )
+    
+    @classmethod
+    def create_for_email(cls, email):
+        """이메일을 위한 임시 인증번호 생성 (계정 생성 전)"""
+        # 기존 미사용 인증번호들을 만료시킴
+        cls.objects.filter(email=email, user__isnull=True, used=False).update(used=True, used_at=timezone.now())
+        
+        # 새 인증번호 생성 (5분 유효)
+        code = cls.generate_code()
+        expires_at = timezone.now() + timedelta(minutes=5)
+        
+        return cls.objects.create(
+            user=None,
+            email=email,
+            code=code,
+            expires_at=expires_at
+        )
+    
+    @classmethod
+    def verify_code(cls, user, code):
+        """인증번호 검증 및 사용자 반환"""
+        try:
+            verification = cls.objects.filter(user=user, code=code, used=False).latest('created_at')
+            
+            # 시도 횟수 증가
+            verification.increment_attempts()
+            
+            if not verification.is_valid():
+                if verification.is_expired():
+                    return None, "인증번호가 만료되었습니다. 새로 요청해주세요."
+                elif verification.attempts >= 5:
+                    return None, "인증 시도 횟수가 초과되었습니다. 새로 요청해주세요."
+                else:
+                    return None, "이미 사용된 인증번호입니다."
+            
+            # 인증번호 사용 처리
+            verification.mark_as_used()
+            
+            # 사용자 이메일 인증 완료 처리
+            user.email_verified = True
+            user.email_verified_at = timezone.now()
+            user.is_active = True  # 계정 활성화
+            user.save(update_fields=['email_verified', 'email_verified_at', 'is_active'])
+            
+            return user, "이메일 인증이 완료되었습니다."
+            
+        except cls.DoesNotExist:
+            return None, "유효하지 않은 인증번호입니다."
+    
+    @classmethod
+    def verify_email_code(cls, email, code):
+        """이메일 기반 인증번호 검증 (계정 생성 전/후 모두 지원)"""
+        try:
+            # 먼저 계정이 없는 임시 인증번호 확인
+            verification = cls.objects.filter(
+                email=email, 
+                code=code, 
+                used=False,
+                user__isnull=True
+            ).latest('created_at')
+            
+            # 시도 횟수 증가
+            verification.increment_attempts()
+            
+            if not verification.is_valid():
+                if verification.is_expired():
+                    return None, "인증번호가 만료되었습니다. 새로 요청해주세요."
+                elif verification.attempts >= 5:
+                    return None, "인증 시도 횟수가 초과되었습니다. 새로 요청해주세요."
+                else:
+                    return None, "이미 사용된 인증번호입니다."
+            
+            # 인증번호 사용 처리
+            verification.mark_as_used()
+            
+            return True, "이메일 인증이 완료되었습니다."
+            
+        except cls.DoesNotExist:
+            # 계정이 있는 경우도 확인
+            try:
+                user = User.objects.get(email=email, is_active=False)
+                return cls.verify_code(user, code)
+            except User.DoesNotExist:
+                return None, "유효하지 않은 인증번호입니다."
+    
+    @classmethod
+    def clean_expired(cls):
+        """만료된 인증번호 정리"""
         cls.objects.filter(expires_at__lt=timezone.now()).delete()

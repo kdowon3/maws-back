@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>환영합니다 - {{ site_name }}</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f8f9fa;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .header {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 28px;
+            font-weight: 600;
+        }
+        .content {
+            padding: 40px 30px;
+        }
+        .welcome-box {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            padding: 20px;
+            border-radius: 6px;
+            margin: 20px 0;
+            text-align: center;
+        }
+        .login-button {
+            display: inline-block;
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+            padding: 16px 32px;
+            text-decoration: none;
+            border-radius: 6px;
+            font-weight: 600;
+            font-size: 16px;
+            margin: 20px 0;
+        }
+        .features {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 6px;
+            margin: 20px 0;
+        }
+        .footer {
+            background: #f8f9fa;
+            padding: 20px 30px;
+            font-size: 14px;
+            color: #666;
+            border-top: 1px solid #e9ecef;
+        }
+        .footer a {
+            color: #28a745;
+            text-decoration: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎉 환영합니다!</h1>
+        </div>
+        
+        <div class="content">
+            <div class="welcome-box">
+                <h2>{{ user.get_full_name|default:user.username }}님</h2>
+                <p><strong>{{ gallery_name }}</strong> 갤러리에 성공적으로 가입되었습니다!</p>
+            </div>
+            
+            <p>이메일 인증이 완료되어 이제 {{ site_name }}의 모든 기능을 사용하실 수 있습니다.</p>
+            
+            <div style="text-align: center; margin: 30px 0;">
+                <a href="{{ login_url }}" class="login-button">지금 로그인하기</a>
+            </div>
+            
+            <div class="features">
+                <h3>이제 사용 가능한 기능들:</h3>
+                <ul>
+                    <li><strong>작품 관리</strong> - 작품 등록, 수정, 삭제</li>
+                    <li><strong>고객 관리</strong> - 고객 정보 및 태그 관리</li>
+                    <li><strong>인증서 출력</strong> - 다양한 템플릿으로 인증서 생성</li>
+                    <li><strong>갤러리 설정</strong> - 갤러리 정보 및 사용자 관리</li>
+                    <li><strong>데이터 내보내기</strong> - Excel, PDF 형태로 데이터 출력</li>
+                </ul>
+            </div>
+            
+            <p>궁금한 점이나 도움이 필요하시면 언제든 문의해주세요. {{ site_name }} 팀이 도와드리겠습니다.</p>
+            
+            <p>갤러리 운영에 성공하시길 바랍니다! 🎨</p>
+        </div>
+        
+        <div class="footer">
+            <p>
+                문의사항이 있으시면 <a href="mailto:{{ support_email }}">{{ support_email }}</a>로 연락해주세요.
+            </p>
+            <p style="margin-top: 15px; font-size: 12px; color: #999;">
+                © 2025 {{ site_name }}. All rights reserved.
+            </p>
+        </div>
+    </div>
+</body>
+</html>

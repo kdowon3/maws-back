@@ -1,9 +1,18 @@
 from django.db import models
+from accounts.models import Gallery
 from clients.models import Client
 
 # Create your models here.
 
 class Artwork(models.Model):
+    gallery = models.ForeignKey(
+        Gallery,
+        on_delete=models.CASCADE,
+        related_name="artworks",
+        null=True,
+        blank=True,
+        verbose_name="소속 갤러리",
+    )
     title_ko = models.CharField(max_length=100, null=True, blank=True)
     title_en = models.CharField(max_length=100, null=True, blank=True)
     artist_ko = models.CharField(max_length=50, null=True, blank=True)

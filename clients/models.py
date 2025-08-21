@@ -1,10 +1,19 @@
 from django.db import models
+from accounts.models import Gallery
 
 # Create your models here.
 
 class Tag(models.Model):
-    """사용자 정의 태그 마스터"""
-    name = models.CharField(max_length=50, unique=True, verbose_name="태그명")
+    """사용자 정의 태그 마스터 (갤러리별)"""
+    gallery = models.ForeignKey(
+        Gallery,
+        on_delete=models.CASCADE,
+        related_name="tags",
+        null=True,
+        blank=True,
+        verbose_name="소속 갤러리",
+    )
+    name = models.CharField(max_length=50, verbose_name="태그명")
     color = models.CharField(max_length=7, default="#3B82F6", verbose_name="색상")  # 헥스 색상
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -13,11 +22,21 @@ class Tag(models.Model):
         verbose_name = "태그"
         verbose_name_plural = "태그들"
         ordering = ['name']
+        unique_together = (("gallery", "name"),)
     
     def __str__(self):
         return self.name
 
 class Client(models.Model):
+    # 갤러리 스코프
+    gallery = models.ForeignKey(
+        Gallery,
+        on_delete=models.CASCADE,
+        related_name="clients",
+        null=True,
+        blank=True,
+        verbose_name="소속 갤러리",
+    )
     # 기본 필드 (고정)
     name = models.CharField(max_length=100, blank=True, null=True, verbose_name="고객명")
     phone = models.CharField(max_length=20, blank=True, null=True, verbose_name="연락처")
@@ -38,6 +57,7 @@ class Client(models.Model):
         if is_new and not self.tags.exists():
             try:
                 default_tag, created = Tag.objects.get_or_create(
+                    gallery=self.gallery,
                     name='일반고객',
                     defaults={'color': '#6B7280'}
                 )

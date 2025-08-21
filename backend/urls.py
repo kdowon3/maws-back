@@ -20,6 +20,20 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 import logging
 
+# JWT 인증 뷰 임포트
+from rest_framework_simplejwt.views import (
+    TokenObtainPairView,
+    TokenRefreshView,
+)
+
+# 관리자 API 뷰 임포트
+from admin_views import (
+    AdminDashboardAPI, 
+    AdminSystemInfoAPI, 
+    AdminStatsDetailAPI, 
+    check_admin_permission
+)
+
 @csrf_exempt
 def log_error(request):
     if request.method == 'POST':
@@ -36,4 +50,14 @@ urlpatterns = [
     path('api/', include('api.urls')),
     path('api/', include('clients.urls')),
     path('api/', include('artworks.urls')),
+    
+    # JWT 인증 엔드포인트
+    path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
+    path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    
+    # 관리자 전용 API 엔드포인트 (superuser 권한 필요)
+    path('api/admin/dashboard/', AdminDashboardAPI.as_view(), name='admin_dashboard'),
+    path('api/admin/system/', AdminSystemInfoAPI.as_view(), name='admin_system_info'),
+    path('api/admin/stats/<str:stat_type>/', AdminStatsDetailAPI.as_view(), name='admin_stats_detail'),
+    path('api/admin/check-permission/', check_admin_permission, name='admin_permission_check'),
 ]

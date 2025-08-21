@@ -26,11 +26,12 @@ class DynamicClientSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Client
-        fields = ['id', 'name', 'phone', 'tags', 'tag_ids', 'data', 'created_at', 'updated_at']
+        fields = ['id', 'gallery', 'name', 'phone', 'tags', 'tag_ids', 'data', 'created_at', 'updated_at']
+        read_only_fields = []
     
     @transaction.atomic
     def update(self, instance, validated_data):
-        print(f"🔧 DynamicClientSerializer.update 호출됨")
+        print(f"DynamicClientSerializer.update called")
         print(f"   - instance.id: {instance.id}")
         print(f"   - validated_data: {validated_data}")
         
@@ -40,7 +41,13 @@ class DynamicClientSerializer(serializers.ModelSerializer):
         instance = super().update(instance, validated_data)
         
         if tag_ids is not None:
-            tags = Tag.objects.filter(id__in=tag_ids)
+            # 현재 갤러리 내 태그만 허용
+            request = self.context.get('request') if hasattr(self, 'context') else None
+            gallery_id = getattr(getattr(request, 'user', None), 'gallery_id', None)
+            tag_qs = Tag.objects.filter(id__in=tag_ids)
+            if gallery_id:
+                tag_qs = tag_qs.filter(gallery_id=gallery_id)
+            tags = tag_qs
             print(f"   - 찾은 태그들: {[tag.name for tag in tags]}")
             instance.tags.set(tags)
             print(f"   - 태그 설정 완료: {[tag.name for tag in instance.tags.all()]}")
@@ -53,24 +60,32 @@ class DynamicClientSerializer(serializers.ModelSerializer):
     
     @transaction.atomic
     def create(self, validated_data):
+        # 갤러리 설정 강제
+        request = self.context.get('request') if hasattr(self, 'context') else None
+        gallery_id = getattr(getattr(request, 'user', None), 'gallery_id', None)
         tag_ids = validated_data.pop('tag_ids', [])
+        if gallery_id and not validated_data.get('gallery_id'):
+            validated_data['gallery_id'] = gallery_id
         instance = super().create(validated_data)
         
         if tag_ids:
-            tags = Tag.objects.filter(id__in=tag_ids)
+            tag_qs = Tag.objects.filter(id__in=tag_ids)
+            if gallery_id:
+                tag_qs = tag_qs.filter(gallery_id=gallery_id)
+            tags = tag_qs
             instance.tags.set(tags)
         
         return instance
 
     def to_representation(self, instance):
-        print(f"📋 DynamicClientSerializer.to_representation 호출됨")
+        print(f"DynamicClientSerializer.to_representation called")
         print(f"   - instance.id: {instance.id}")
         print(f"   - instance.name: {instance.name}")
         print(f"   - instance.tags.count(): {instance.tags.count()}")
         print(f"   - instance.tags.all(): {[tag.name for tag in instance.tags.all()]}")
         
         rep = super().to_representation(instance)
-        print(f"   - 기본 rep: {rep}")
+        print(f"   - basic rep: {rep}")
         
         # data 필드의 내용을 최상위로 병합 (기존 기본 필드와 태그 관련 필드는 덮어쓰지 않음)
         if instance.data:
@@ -91,18 +106,24 @@ class DynamicClientSerializer(serializers.ModelSerializer):
         # data 필드에서 태그 관련 정보 재귀적으로 완전히 제거 (중복 방지)
         if 'data' in rep and isinstance(rep['data'], dict):
             remove_tag_keys_recursively(rep['data'])
-            print(f"🗑️ data 필드에서 태그 관련 키 재귀적으로 제거 완료")
+            print(f"data field tag related keys removed recursively")
         
         print(f"   - 최종 rep: {rep}")
         return rep
 
     def to_internal_value(self, data):
-        # AI 매핑 시스템으로 이미 올바른 구조로 전송되므로 간단히 처리
+        # AI 매핑 시스템으로 이미 올바른 구조로 전송되므로 간단히 처리하되, 갤러리 주입
         validated_data = {
             'name': data.get('name', ''),
             'phone': data.get('phone', ''),
             'tag_ids': data.get('tag_ids', []),
             'data': data.get('data', {})
         }
-        
-        return super().to_internal_value(validated_data) 
+        ret = super().to_internal_value(validated_data)
+        request = self.context.get('request') if hasattr(self, 'context') else None
+        gallery_id = getattr(getattr(request, 'user', None), 'gallery_id', None)
+        print(f"[SERIALIZER DEBUG] Gallery ID from user: {gallery_id}")
+        if gallery_id is not None:
+            ret['gallery'] = gallery_id  # gallery_id가 아니라 gallery 필드에 할당
+            print(f"[SERIALIZER DEBUG] Setting gallery to: {gallery_id}")
+        return ret

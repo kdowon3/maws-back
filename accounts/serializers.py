@@ -6,8 +6,11 @@ from django.core.exceptions import ValidationError
 from django.utils import timezone
 from django.db import transaction
 import re
-from .models import Gallery, User, LoginHistory, PhoneVerification
+from .models import Gallery, User, LoginHistory, PhoneVerification, EmailVerification
 import user_agents
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
@@ -41,13 +44,19 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         if user.is_account_locked():
             raise serializers.ValidationError('계정이 임시 잠금되었습니다. 잠시 후 다시 시도해주세요.')
         
-        # 갤러리 활성 상태 확인
-        if not user.gallery.is_active:
-            raise serializers.ValidationError('소속 갤러리가 비활성 상태입니다.')
-        
-        # 구독 상태 확인
-        if not user.gallery.is_subscription_active:
-            raise serializers.ValidationError('갤러리 구독이 만료되었습니다.')
+        # 슈퍼유저가 아닌 경우에만 갤러리 상태 확인
+        if not user.is_superuser:
+            # 갤러리가 없는 경우 체크
+            if not hasattr(user, 'gallery') or not user.gallery:
+                raise serializers.ValidationError('소속 갤러리가 없습니다.')
+                
+            # 갤러리 활성 상태 확인
+            if not user.gallery.is_active:
+                raise serializers.ValidationError('소속 갤러리가 비활성 상태입니다.')
+            
+            # 구독 상태 확인
+            if not user.gallery.is_subscription_active:
+                raise serializers.ValidationError('갤러리 구독이 만료되었습니다.')
         
         # 기본 토큰 생성
         data = super().validate(attrs)
@@ -66,36 +75,44 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
             # 로그인 이력 생성
             self.create_login_history(user, request, ip_address)
         
+        # 사용자 정보 구성
+        user_data = {
+            'id': user.id,
+            'username': user.username,
+            'email': user.email,
+            'first_name': user.first_name,
+            'last_name': user.last_name,
+            'role': user.role,
+            'role_display': user.get_role_display_ko(),
+            'is_superuser': user.is_superuser,
+            'is_staff': user.is_staff,
+            'permissions': {
+                'manage_clients': user.can_manage_clients,
+                'manage_artworks': user.can_manage_artworks,
+                'export_data': user.can_export_data,
+                'send_messages': user.can_send_messages,
+                'view_reports': user.can_view_reports,
+                'manage_users': user.can_manage_users,
+                'manage_gallery_settings': user.can_manage_gallery_settings,
+            },
+            'settings': {
+                'timezone': user.timezone_setting,
+                'language': user.language,
+                'theme': user.theme_preference,
+            }
+        }
+        
+        # 슈퍼유저가 아닌 경우에만 갤러리 정보 추가
+        if not user.is_superuser and user.gallery:
+            user_data['gallery'] = {
+                'id': user.gallery.id,
+                'name': user.gallery.name,
+                'registration_code': user.gallery.registration_code,
+            }
+        
         # 사용자 정보 및 권한 추가
         data.update({
-            'user': {
-                'id': user.id,
-                'username': user.username,
-                'email': user.email,
-                'first_name': user.first_name,
-                'last_name': user.last_name,
-                'role': user.role,
-                'role_display': user.get_role_display_ko(),
-                'gallery': {
-                    'id': user.gallery.id,
-                    'name': user.gallery.name,
-                    'registration_code': user.gallery.registration_code,
-                },
-                'permissions': {
-                    'manage_clients': user.can_manage_clients,
-                    'manage_artworks': user.can_manage_artworks,
-                    'export_data': user.can_export_data,
-                    'send_messages': user.can_send_messages,
-                    'view_reports': user.can_view_reports,
-                    'manage_users': user.can_manage_users,
-                    'manage_gallery_settings': user.can_manage_gallery_settings,
-                },
-                'settings': {
-                    'timezone': user.timezone_setting,
-                    'language': user.language,
-                    'theme': user.theme_preference,
-                }
-            }
+            'user': user_data
         })
         
         return data
@@ -310,19 +327,16 @@ class GallerySerializer(serializers.ModelSerializer):
 
 
 class QuickSignupSerializer(serializers.ModelSerializer):
-    """간편 가입 시리얼라이저"""
+    """간편 가입 시리얼라이저 (이메일 인증 기반)"""
     
     gallery_name = serializers.CharField(max_length=100, write_only=True, label="갤러리명")
-    phone_number = serializers.CharField(max_length=20, write_only=True, label="전화번호")
-    firebase_id_token = serializers.CharField(write_only=True, label="Firebase ID 토큰")
     password = serializers.CharField(write_only=True, style={'input_type': 'password'})
     password_confirm = serializers.CharField(write_only=True, style={'input_type': 'password'})
     
     class Meta:
         model = User
         fields = [
-            'gallery_name', 'phone_number', 'firebase_id_token',
-            'username', 'email', 'password', 'password_confirm',
+            'gallery_name', 'username', 'email', 'password', 'password_confirm',
             'first_name', 'last_name', 'job_title'
         ]
     
@@ -337,20 +351,6 @@ class QuickSignupSerializer(serializers.ModelSerializer):
         
         return value.strip()
     
-    def validate_phone_number(self, value):
-        """전화번호 형식 검증"""
-        # 번호 정규화
-        clean_phone = re.sub(r'[^0-9]', '', value)
-        
-        # 한국 휴대폰 번호 형식 확인
-        if not re.match(r'^01[016789]\d{7,8}$', clean_phone):
-            raise serializers.ValidationError('올바른 휴대폰 번호를 입력해주세요.')
-        
-        # 이미 사용 중인 번호 확인
-        if Gallery.objects.filter(verified_phone=clean_phone).exists():
-            raise serializers.ValidationError('이미 사용 중인 전화번호입니다.')
-        
-        return clean_phone
     
     def validate_username(self, value):
         """아이디 중복 확인"""
@@ -366,60 +366,6 @@ class QuickSignupSerializer(serializers.ModelSerializer):
     
     def validate(self, attrs):
         """전체 데이터 검증"""
-        from .firebase_auth import verify_firebase_id_token, validate_phone_number_format
-        
-        # Firebase ID 토큰 검증
-        firebase_id_token = attrs.get('firebase_id_token')
-        phone_number = attrs.get('phone_number')
-        
-        if not firebase_id_token:
-            raise serializers.ValidationError({
-                'firebase_id_token': 'Firebase ID 토큰이 필요합니다.'
-            })
-        
-        # Firebase 토큰 검증
-        firebase_user = verify_firebase_id_token(firebase_id_token)
-        if not firebase_user:
-            raise serializers.ValidationError({
-                'firebase_id_token': 'Firebase 토큰이 유효하지 않습니다.'
-            })
-        
-        # Firebase에서 인증된 전화번호와 입력된 전화번호 비교
-        firebase_phone = firebase_user.get('phone_number')
-        if not firebase_phone:
-            raise serializers.ValidationError({
-                'firebase_id_token': 'Firebase에서 전화번호를 찾을 수 없습니다.'
-            })
-        
-        # 전화번호 형식 통일 (한국 번호 +82 형식으로)
-        def normalize_phone_number(phone):
-            # 숫자만 추출
-            cleaned = re.sub(r'[^0-9]', '', phone)
-            
-            # 이미 국가 코드가 있는 경우
-            if cleaned.startswith('82'):
-                return f"+{cleaned}"
-            
-            # 010으로 시작하는 한국 번호
-            if cleaned.startswith('010'):
-                return f"+82{cleaned[1:]}"
-            
-            # 기본적으로 한국 국가 코드 추가
-            return f"+82{cleaned}"
-        
-        normalized_input_phone = normalize_phone_number(phone_number)
-        
-        if firebase_phone != normalized_input_phone:
-            raise serializers.ValidationError({
-                'phone_number': f'Firebase에서 인증된 전화번호({firebase_phone})와 입력된 전화번호({normalized_input_phone})가 일치하지 않습니다.'
-            })
-        
-        # 이미 사용 중인 전화번호 확인
-        if Gallery.objects.filter(verified_phone=re.sub(r'[^0-9]', '', firebase_phone)).exists():
-            raise serializers.ValidationError({
-                'phone_number': '이미 사용 중인 전화번호입니다.'
-            })
-        
         # 비밀번호 확인
         password = attrs.get('password')
         password_confirm = attrs.get('password_confirm')
@@ -435,48 +381,85 @@ class QuickSignupSerializer(serializers.ModelSerializer):
         except ValidationError as e:
             raise serializers.ValidationError({'password': e.messages})
         
-        # Firebase 사용자 정보를 attrs에 추가
-        attrs['firebase_user'] = firebase_user
-        attrs['verified_phone'] = re.sub(r'[^0-9]', '', firebase_phone)
-        
         return attrs
     
     def create(self, validated_data):
-        """갤러리 + 사용자 생성 (Firebase 인증 기반)"""
+        """갤러리 + 사용자 생성 (이메일 인증 기반)"""
+        from .email_utils import send_verification_email
+        import os
+        
         gallery_name = validated_data.pop('gallery_name')
-        phone_number = validated_data.pop('phone_number')
-        firebase_id_token = validated_data.pop('firebase_id_token')
-        firebase_user = validated_data.pop('firebase_user')
-        verified_phone = validated_data.pop('verified_phone')
         password_confirm = validated_data.pop('password_confirm')
         
+        # 이메일 인증 스킵 여부 확인
+        skip_email_verification = os.environ.get('SKIP_EMAIL_VERIFICATION', 'False').lower() == 'true'
+        
         with transaction.atomic():
-            # 1. 갤러리 자동 생성 (Firebase 인증된 전화번호 사용)
+            # 1. 갤러리 자동 생성
             gallery = Gallery.objects.create(
                 name=gallery_name,
                 signup_method='quick',
-                verified_phone=verified_phone,
-                phone_verified_at=timezone.now(),
                 auto_generated=True,
                 # 기본값들 (사용자가 나중에 수정 가능)
                 address=f"{gallery_name} 주소",  # 임시값
-                phone=verified_phone,
+                phone="000-0000-0000",  # 임시값
                 email=validated_data['email']
-                # business_number는 나중에 추가 가능
             )
             
             # 2. 사용자 생성 (갤러리 오너로 설정)
             user = User.objects.create_user(
                 gallery=gallery,
                 role='owner',  # 간편가입자는 자동으로 오너
-                phone=verified_phone,
+                is_active=True if skip_email_verification else False,  # 스킵 옵션에 따라 즉시 활성화
+                email_verified=True if skip_email_verification else False,  # 스킵 시 이메일 인증도 완료로 표시
                 **validated_data
             )
             
-            # 3. Firebase UID를 사용자 정보에 저장 (옵션)
-            # user.firebase_uid = firebase_user.get('uid')
-            # user.save()
-            
-            print(f"✅ Firebase 인증으로 갤러리 '{gallery_name}' 생성 완료: {firebase_user.get('uid')}")
+            # 3. 이메일 인증번호 발송 (스킵 옵션이 False일 때만)
+            if not skip_email_verification:
+                success, message = send_verification_email(user)
+                if not success:
+                    # 이메일 발송 실패시 사용자 생성을 롤백하지 않고 로그만 남김
+                    logger.warning(f"이메일 발송 실패: {user.email}, {message}")
+                print(f"이메일 인증으로 갤러리 '{gallery_name}' 생성 완료: {user.email}")
+            else:
+                print(f"즉시 활성화로 갤러리 '{gallery_name}' 생성 완료: {user.email}")
             
             return user
+
+
+class EmailVerificationSerializer(serializers.Serializer):
+    """이메일 인증번호 발송 시리얼라이저"""
+    
+    email = serializers.EmailField()
+    
+    def validate_email(self, value):
+        """이메일 존재 여부 확인"""
+        try:
+            user = User.objects.get(email=value, is_active=False)
+            return value
+        except User.DoesNotExist:
+            raise serializers.ValidationError('해당 이메일로 가입된 미인증 계정을 찾을 수 없습니다.')
+
+
+class EmailVerificationConfirmSerializer(serializers.Serializer):
+    """이메일 인증번호 확인 시리얼라이저"""
+    
+    email = serializers.EmailField()
+    code = serializers.CharField(max_length=6, min_length=6)
+    
+    def validate_email(self, value):
+        """이메일 존재 여부 확인"""
+        try:
+            user = User.objects.get(email=value, is_active=False)
+            return value
+        except User.DoesNotExist:
+            raise serializers.ValidationError('해당 이메일로 가입된 미인증 계정을 찾을 수 없습니다.')
+    
+    def validate_code(self, value):
+        """인증번호 형식 확인"""
+        if not value.isdigit():
+            raise serializers.ValidationError('인증번호는 6자리 숫자여야 합니다.')
+        return value
+
+

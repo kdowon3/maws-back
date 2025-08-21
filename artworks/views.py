@@ -1,5 +1,5 @@
 from django.shortcuts import render
-from rest_framework import viewsets, filters
+from rest_framework import viewsets, filters, permissions
 from .models import Artwork
 from .serializers import ArtworkSerializer
 from clients.models import Client
@@ -19,9 +19,21 @@ class ArtworkViewSet(viewsets.ModelViewSet):
     search_fields = ['title_ko', 'title_en', 'artist_ko', 'artist_en']
     ordering_fields = ['id', 'price', 'year']
     ordering = ['-id']  # 기본 정렬: ID 역순 (최신 등록순)
+    permission_classes = [permissions.IsAuthenticated]
     
     def get_queryset(self):
-        queryset = super().get_queryset()
+        # 갤러리 스코프 적용
+        user = getattr(self.request, 'user', None)
+        base_qs = super().get_queryset()
+        print(f"[GET DEBUG] User: {user}")
+        print(f"[GET DEBUG] User gallery_id: {getattr(user, 'gallery_id', None) if user else 'No user'}")
+        if user and getattr(user, 'gallery_id', None):
+            queryset = base_qs.filter(gallery_id=user.gallery_id)
+            print(f"[GET DEBUG] Filtering by gallery_id: {user.gallery_id}")
+            print(f"[GET DEBUG] Filtered queryset count: {queryset.count()}")
+        else:
+            queryset = base_qs.none()
+            print("[GET DEBUG] No gallery_id, returning empty queryset")
         
         try:
             # 작가 필터링
@@ -53,13 +65,19 @@ class ArtworkViewSet(viewsets.ModelViewSet):
         data = request.data.copy()
         file = request.FILES.get('image')
         if file:
+            print(f"[DEBUG] Uploading to bucket: {settings.AWS_STORAGE_BUCKET_NAME}")
+            print(f"[DEBUG] File name: {file.name}")
+            print(f"[DEBUG] AWS_ACCESS_KEY_ID: {settings.AWS_ACCESS_KEY_ID}")
+            print(f"[DEBUG] AWS_SECRET_ACCESS_KEY: {settings.AWS_SECRET_ACCESS_KEY[:10]}..." if settings.AWS_SECRET_ACCESS_KEY else "None")
             s3_client = boto3.client(
                 's3',
                 aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
                 aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
                 region_name=settings.AWS_S3_REGION_NAME,
             )
-            s3_key = f"artworks/{file.name}"
+            # 파일명에서 공백을 언더스코어로 변경
+            safe_filename = file.name.replace(' ', '_')
+            s3_key = f"artworks/{safe_filename}"
             s3_client.upload_fileobj(
                 file,
                 settings.AWS_STORAGE_BUCKET_NAME,
@@ -69,8 +87,17 @@ class ArtworkViewSet(viewsets.ModelViewSet):
                 }
             )
             file_url = f"https://{settings.AWS_STORAGE_BUCKET_NAME}.s3.{settings.AWS_S3_REGION_NAME}.amazonaws.com/{s3_key}"
+            print(f"[DEBUG] Generated URL: {file_url}")
             data['image'] = file_url
-        serializer = self.get_serializer(data=data)
+        # 갤러리 지정 강제
+        print(f"[DEBUG] User: {request.user}")
+        print(f"[DEBUG] User gallery_id: {getattr(request.user, 'gallery_id', None)}")
+        if getattr(request.user, 'gallery_id', None):
+            data['gallery'] = request.user.gallery_id
+            print(f"[DEBUG] Setting gallery to: {request.user.gallery_id}")
+        else:
+            print("[DEBUG] No gallery_id found for user")
+        serializer = self.get_serializer(data=data, context={'request': request})
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
         headers = self.get_success_headers(serializer.data)
@@ -88,7 +115,9 @@ class ArtworkViewSet(viewsets.ModelViewSet):
                 aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
                 region_name=settings.AWS_S3_REGION_NAME,
             )
-            s3_key = f"artworks/{file.name}"
+            # 파일명에서 공백을 언더스코어로 변경
+            safe_filename = file.name.replace(' ', '_')
+            s3_key = f"artworks/{safe_filename}"
             s3_client.upload_fileobj(
                 file,
                 settings.AWS_STORAGE_BUCKET_NAME,
@@ -101,7 +130,9 @@ class ArtworkViewSet(viewsets.ModelViewSet):
             data['image'] = file_url
         else:
             data['image'] = instance.image
-        serializer = self.get_serializer(instance, data=data, partial=partial)
+        # 갤러리 불변 보장
+        data['gallery'] = instance.gallery_id
+        serializer = self.get_serializer(instance, data=data, partial=partial, context={'request': request})
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
         return Response(serializer.data)

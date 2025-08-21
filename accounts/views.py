@@ -11,7 +11,7 @@ from django.db import transaction
 import random
 import re
 from datetime import timedelta
-from .models import User, Gallery, LoginHistory, PhoneVerification
+from .models import User, Gallery, LoginHistory, PhoneVerification, EmailVerification
 from .firebase_auth import check_firebase_settings
 from .serializers import (
     CustomTokenObtainPairSerializer,
@@ -20,7 +20,9 @@ from .serializers import (
     PasswordChangeSerializer,
     LoginHistorySerializer,
     GallerySerializer,
-    QuickSignupSerializer
+    QuickSignupSerializer,
+    EmailVerificationSerializer,
+    EmailVerificationConfirmSerializer
 )
 
 
@@ -528,3 +530,105 @@ def quick_signup(request):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])
+def send_email_verification(request):
+    """이메일 인증번호 발송 (계정 생성 전/후 모두 지원)"""
+    from .email_utils import send_verification_email_to_address, resend_verification_email
+    from datetime import timedelta
+    
+    email = request.data.get('email')
+    if not email:
+        return Response({
+            'error': '이메일을 입력해주세요.'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        # 이메일 중복 확인
+        if User.objects.filter(email=email, is_active=True).exists():
+            return Response({
+                'error': '이미 사용 중인 이메일입니다.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # 최근 1분 내 발송 제한 확인
+        recent_verification = EmailVerification.objects.filter(
+            email=email,
+            created_at__gte=timezone.now() - timedelta(minutes=1)
+        ).first()
+        
+        if recent_verification:
+            return Response({
+                'error': '인증번호 재발송은 1분 후에 가능합니다.'
+            }, status=status.HTTP_429_TOO_MANY_REQUESTS)
+        
+        # 이메일 인증번호 발송
+        success, message = send_verification_email_to_address(email, request)
+        
+        if success:
+            return Response({
+                'message': message,
+                'email': email
+            }, status=status.HTTP_200_OK)
+        else:
+            return Response({
+                'error': message
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                
+    except Exception as e:
+        return Response({
+            'error': f'인증번호 발송 중 오류가 발생했습니다: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])
+def verify_email_code(request):
+    """이메일 인증번호 확인 (계정 생성 전/후 모두 지원)"""
+    from .email_utils import verify_email_code_by_email
+    
+    email = request.data.get('email')
+    code = request.data.get('code')
+    
+    if not email or not code:
+        return Response({
+            'error': '이메일과 인증번호를 모두 입력해주세요.'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        # 인증번호 확인
+        result, message = verify_email_code_by_email(email, code)
+        
+        if result:
+            # 사용자 객체가 반환된 경우 (계정이 있는 경우)
+            if hasattr(result, 'email'):
+                return Response({
+                    'message': message,
+                    'user': {
+                        'id': result.id,
+                        'username': result.username,
+                        'email': result.email,
+                        'full_name': f'{result.first_name} {result.last_name}',
+                        'gallery': {
+                            'id': result.gallery.id,
+                            'name': result.gallery.name
+                        }
+                    }
+                }, status=status.HTTP_200_OK)
+            else:
+                # 임시 인증 성공 (계정 생성 전)
+                return Response({
+                    'message': message,
+                    'verified': True,
+                    'email': email
+                }, status=status.HTTP_200_OK)
+        else:
+            return Response({
+                'error': message
+            }, status=status.HTTP_400_BAD_REQUEST)
+                
+    except Exception as e:
+        return Response({
+            'error': f'인증번호 확인 중 오류가 발생했습니다: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

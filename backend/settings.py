@@ -17,6 +17,22 @@ from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 load_dotenv()
 
+# 강제로 .env 파일의 값 사용
+import os
+from pathlib import Path
+env_path = Path(__file__).resolve().parent.parent / '.env'
+if env_path.exists():
+    with open(env_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            if line.strip() and not line.startswith('#') and '=' in line:
+                key, value = line.strip().split('=', 1)
+                # 따옴표 제거
+                if value.startswith('"') and value.endswith('"'):
+                    value = value[1:-1]
+                elif value.startswith("'") and value.endswith("'"):
+                    value = value[1:-1]
+                os.environ[key] = value
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -61,6 +77,7 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'admin_middleware.AdminSecurityMiddleware',  # 간소화된 관리자 보안 미들웨어 (IP 필터링만)
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -195,6 +212,10 @@ AWS_STORAGE_BUCKET_NAME = os.environ.get('AWS_STORAGE_BUCKET_NAME')
 AWS_S3_REGION_NAME = os.environ.get('AWS_S3_REGION_NAME')
 AWS_S3_SIGNATURE_VERSION = os.environ.get('AWS_S3_SIGNATURE_VERSION')
 
+# Debug AWS 설정
+print(f"[SETTINGS DEBUG] AWS_ACCESS_KEY_ID: {AWS_ACCESS_KEY_ID}")
+print(f"[SETTINGS DEBUG] AWS_SECRET_ACCESS_KEY: {AWS_SECRET_ACCESS_KEY[:10]}..." if AWS_SECRET_ACCESS_KEY else "None")
+
 # S3 커스텀 도메인 및 정적 파일 설정 (사진 참고)
 AWS_S3_CUSTOM_DOMAIN = "%s.s3.%s.amazonaws.com" % (
     AWS_STORAGE_BUCKET_NAME,
@@ -222,3 +243,90 @@ CORS_ALLOWED_ORIGINS = [
 
 # Firebase 설정
 FIREBASE_PROJECT_ID = os.environ.get('FIREBASE_PROJECT_ID', 'mawsauth')
+
+# AWS SES 설정 - MAWS 프로젝트
+EMAIL_BACKEND = 'django_ses.SESBackend'
+AWS_SES_REGION_NAME = os.environ.get('AWS_SES_REGION_NAME', 'ap-northeast-2')  # 서울 리전
+AWS_SES_REGION_ENDPOINT = f'email.{AWS_SES_REGION_NAME}.amazonaws.com'
+DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'MAWS <noreply@maws.app>')
+
+print("[MAWS] AWS SES email mode activated")
+
+# ===== MAWS 관리자 대시보드 설정 =====
+
+# 관리자 대시보드 활성화
+ADMIN_DASHBOARD_ENABLED = os.environ.get('ADMIN_DASHBOARD_ENABLED', 'True').lower() == 'true'
+
+# 관리자 API 보안 설정
+ADMIN_ALLOWED_IPS = [
+    ip.strip() for ip in 
+    os.environ.get('ADMIN_ALLOWED_IPS', '').split(',')
+    if ip.strip()
+]  # 빈 리스트면 IP 제한 없음 (개발 환경용)
+
+# 관리자 API 요청 제한 설정
+ADMIN_RATE_LIMIT_REQUESTS = int(os.environ.get('ADMIN_RATE_LIMIT_REQUESTS', '100'))  # 시간당 요청 수
+ADMIN_RATE_LIMIT_WINDOW = int(os.environ.get('ADMIN_RATE_LIMIT_WINDOW', '3600'))  # 시간 윈도우 (초)
+
+# 로깅 설정 (관리자 보안 이벤트용)
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
+            'style': '{',
+        },
+        'simple': {
+            'format': '{levelname} {message}',
+            'style': '{',
+        },
+        'admin_security': {
+            'format': '[ADMIN SECURITY] {asctime} - {levelname} - {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'level': 'INFO',
+            'class': 'logging.StreamHandler',
+            'formatter': 'simple',
+        },
+        'admin_security_file': {
+            'level': 'INFO',
+            'class': 'logging.FileHandler',
+            'filename': BASE_DIR / 'logs' / 'admin_security.log',
+            'formatter': 'admin_security',
+        },
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': True,
+        },
+        'admin_views': {
+            'handlers': ['console', 'admin_security_file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'admin_middleware': {
+            'handlers': ['console', 'admin_security_file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'admin_stats': {
+            'handlers': ['console', 'admin_security_file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+    },
+}
+
+# 로그 디렉토리 생성
+LOGS_DIR = BASE_DIR / 'logs'
+LOGS_DIR.mkdir(exist_ok=True)
+
+print(f"[MAWS] Admin Dashboard Enabled: {ADMIN_DASHBOARD_ENABLED}")
+print(f"[MAWS] Admin IP Restrictions: {len(ADMIN_ALLOWED_IPS)} IPs configured")
+print(f"[MAWS] Admin Rate Limit: {ADMIN_RATE_LIMIT_REQUESTS} requests per {ADMIN_RATE_LIMIT_WINDOW}s")
