@@ -212,9 +212,7 @@ AWS_STORAGE_BUCKET_NAME = os.environ.get('AWS_STORAGE_BUCKET_NAME')
 AWS_S3_REGION_NAME = os.environ.get('AWS_S3_REGION_NAME')
 AWS_S3_SIGNATURE_VERSION = os.environ.get('AWS_S3_SIGNATURE_VERSION')
 
-# Debug AWS 설정
-print(f"[SETTINGS DEBUG] AWS_ACCESS_KEY_ID: {AWS_ACCESS_KEY_ID}")
-print(f"[SETTINGS DEBUG] AWS_SECRET_ACCESS_KEY: {AWS_SECRET_ACCESS_KEY[:10]}..." if AWS_SECRET_ACCESS_KEY else "None")
+# AWS 설정 로드 (보안상 로그 출력 제거)
 
 # S3 커스텀 도메인 및 정적 파일 설정 (사진 참고)
 AWS_S3_CUSTOM_DOMAIN = "%s.s3.%s.amazonaws.com" % (
