@@ -78,3 +78,27 @@ class Client(models.Model):
     class Meta:
         verbose_name = "고객"
         verbose_name_plural = "고객들"
+
+
+class ClientColumn(models.Model):
+    """고객 동적 컬럼 정의"""
+    gallery = models.ForeignKey(
+        Gallery,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        verbose_name="소속 갤러리"
+    )
+    header = models.CharField(max_length=100, verbose_name="헤더명")
+    accessor = models.CharField(max_length=100, verbose_name="접근자")
+    type = models.CharField(max_length=20, default='text', verbose_name="필드 타입")
+    order = models.PositiveIntegerField(default=0, verbose_name="순서")
+    
+    class Meta:
+        verbose_name = "고객 컬럼"
+        verbose_name_plural = "고객 컬럼들"
+        unique_together = ['gallery', 'accessor']
+        ordering = ['order', 'id']
+    
+    def __str__(self):
+        return f"{self.header} ({self.gallery.name if self.gallery else 'No Gallery'})"

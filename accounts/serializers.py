@@ -415,7 +415,18 @@ class QuickSignupSerializer(serializers.ModelSerializer):
                 **validated_data
             )
             
-            # 3. 이메일 인증번호 발송 (스킵 옵션이 False일 때만)
+            # 3. 기본 ClientColumn 생성
+            from clients.models import ClientColumn
+            default_columns = [
+                {"header": "고객명", "accessor": "name", "type": "text", "order": 1},
+                {"header": "연락처", "accessor": "phone", "type": "text", "order": 2}, 
+                {"header": "고객분류", "accessor": "tags", "type": "tag", "order": 3}
+            ]
+            for col_data in default_columns:
+                ClientColumn.objects.create(gallery=gallery, **col_data)
+            print(f"[SUCCESS] 갤러리 '{gallery_name}'에 기본 컬럼 {len(default_columns)}개 생성 완료")
+            
+            # 4. 이메일 인증번호 발송 (스킵 옵션이 False일 때만)
             if not skip_email_verification:
                 success, message = send_verification_email(user)
                 if not success:

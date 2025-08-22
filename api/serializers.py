@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import ClientColumn
+from clients.models import ClientColumn
 from clients.models import Client, Tag
 
 class ClientColumnSerializer(serializers.ModelSerializer):

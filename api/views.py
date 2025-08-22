@@ -2,7 +2,7 @@ from rest_framework import viewsets, permissions
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from .models import ClientColumn
+from clients.models import ClientColumn
 from clients.models import Client, Tag
 from .serializers import ClientColumnSerializer, ClientSerializer, TagSerializer
 
@@ -21,8 +21,29 @@ class ClientColumnViewSet(viewsets.ModelViewSet):
         return ClientColumn.objects.none()
     
     def perform_create(self, serializer):
-        """컬럼 생성 시 현재 사용자의 갤러리 자동 할당"""
+        """컬럼 생성 시 현재 사용자의 갤러리 자동 할당 (중복 방지)"""
         gallery = getattr(self.request.user, 'gallery', None)
+        if not gallery:
+            print(f"❌ 컬럼 생성 실패: 사용자 {self.request.user.username}에게 갤러리가 할당되지 않음")
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError("갤러리 정보가 없습니다. 관리자에게 문의하세요.")
+        
+        # 중복 컬럼 생성 방지
+        header = serializer.validated_data.get('header')
+        accessor = serializer.validated_data.get('accessor')
+        
+        # 같은 갤러리에서 동일한 accessor를 가진 컬럼이 이미 있는지 확인
+        existing_column = ClientColumn.objects.filter(
+            gallery=gallery,
+            accessor=accessor
+        ).first()
+        
+        if existing_column:
+            print(f"⚠️ 컬럼 중복 생성 방지: {header} (accessor: {accessor}) 이미 존재")
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError(f"'{header}' 컬럼이 이미 존재합니다.")
+        
+        print(f"✅ 컬럼 생성: {header} (갤러리: {gallery.name})")
         serializer.save(gallery=gallery)
     
     def update(self, request, *args, **kwargs):

@@ -2,7 +2,7 @@
 from accounts.models import Gallery, User, LoginHistory
 from clients.models import Client, Tag
 from artworks.models import Artwork
-from api.models import ClientColumn
+from clients.models import ClientColumn
 from django.db.models import Count, Q
 from django.utils import timezone
 from datetime import timedelta

@@ -4,8 +4,7 @@ from django.http import HttpResponseRedirect
 from django.urls import path
 from django.shortcuts import render
 from django.db import transaction
-from .models import Client
-from api.models import ClientColumn
+from .models import Client, ClientColumn
 
 @admin.action(description='선택된 고객 데이터 삭제')
 def delete_selected_clients(modeladmin, request, queryset):
@@ -69,4 +68,11 @@ class ClientAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         return super().get_queryset(request).order_by('-created_at')
 
+class ClientColumnAdmin(admin.ModelAdmin):
+    list_display = ['id', 'gallery', 'header', 'accessor', 'type', 'order']
+    list_filter = ['type', 'gallery']
+    search_fields = ['header', 'accessor']
+    ordering = ['gallery', 'order', 'id']
+
 admin.site.register(Client, ClientAdmin)
+admin.site.register(ClientColumn, ClientColumnAdmin)
