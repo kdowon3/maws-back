@@ -68,6 +68,7 @@ INSTALLED_APPS = [
     'api',
     'clients',
     'artworks',
+    'sms',
 ]
 
 MIDDLEWARE = [
@@ -328,3 +329,23 @@ LOGS_DIR.mkdir(exist_ok=True)
 print(f"[MAWS] Admin Dashboard Enabled: {ADMIN_DASHBOARD_ENABLED}")
 print(f"[MAWS] Admin IP Restrictions: {len(ADMIN_ALLOWED_IPS)} IPs configured")
 print(f"[MAWS] Admin Rate Limit: {ADMIN_RATE_LIMIT_REQUESTS} requests per {ADMIN_RATE_LIMIT_WINDOW}s")
+
+# ===== Twilio SMS 설정 =====
+TWILIO_ACCOUNT_SID = os.environ.get('TWILIO_ACCOUNT_SID')
+TWILIO_AUTH_TOKEN = os.environ.get('TWILIO_AUTH_TOKEN') 
+TWILIO_PHONE_NUMBER = os.environ.get('TWILIO_PHONE_NUMBER')
+
+# Twilio 설정 검증 (필수값 체크)
+TWILIO_CONFIGURED = all([TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER])
+
+if TWILIO_CONFIGURED:
+    print("[MAWS] Twilio SMS service configured successfully")
+else:
+    print("[MAWS] Warning: Twilio SMS service not configured - check environment variables")
+
+# SMS 발송 속도 제한 설정 (과부하 방지)
+SMS_SEND_DELAY = float(os.environ.get('SMS_SEND_DELAY', '1.5'))  # 발송 간격 (초)
+SMS_BATCH_SIZE = int(os.environ.get('SMS_BATCH_SIZE', '50'))     # 한번에 처리할 최대 건수
+
+print(f"[MAWS] SMS send delay: {SMS_SEND_DELAY}s between messages")
+print(f"[MAWS] SMS batch size: {SMS_BATCH_SIZE} messages per batch")

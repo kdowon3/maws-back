@@ -31,6 +31,7 @@ from admin_views import (
     AdminDashboardAPI, 
     AdminSystemInfoAPI, 
     AdminStatsDetailAPI, 
+    AdminSMSLogsAPI,
     check_admin_permission
 )
 
@@ -50,6 +51,7 @@ urlpatterns = [
     path('api/', include('api.urls')),
     path('api/', include('clients.urls')),
     path('api/', include('artworks.urls')),
+    path('api/sms/', include('sms.urls')),
     
     # JWT 인증 엔드포인트
     path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
@@ -59,5 +61,6 @@ urlpatterns = [
     path('api/admin/dashboard/', AdminDashboardAPI.as_view(), name='admin_dashboard'),
     path('api/admin/system/', AdminSystemInfoAPI.as_view(), name='admin_system_info'),
     path('api/admin/stats/<str:stat_type>/', AdminStatsDetailAPI.as_view(), name='admin_stats_detail'),
+    path('api/admin/sms-logs/', AdminSMSLogsAPI.as_view(), name='admin_sms_logs'),
     path('api/admin/check-permission/', check_admin_permission, name='admin_permission_check'),
 ]
