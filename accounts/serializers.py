@@ -107,6 +107,9 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
             user_data['gallery'] = {
                 'id': user.gallery.id,
                 'name': user.gallery.name,
+                'phone': user.gallery.phone,
+                'address': user.gallery.address,
+                'email': user.gallery.email,
                 'registration_code': user.gallery.registration_code,
             }
         
@@ -154,15 +157,29 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
 class UserSerializer(serializers.ModelSerializer):
     """사용자 정보 시리얼라이저"""
     
+    gallery = serializers.SerializerMethodField()
     gallery_name = serializers.CharField(source='gallery.name', read_only=True)
     role_display = serializers.CharField(source='get_role_display_ko', read_only=True)
     full_name = serializers.CharField(source='get_full_name', read_only=True)
+    
+    def get_gallery(self, obj):
+        """갤러리 정보 반환"""
+        if obj.gallery:
+            return {
+                'id': obj.gallery.id,
+                'name': obj.gallery.name,
+                'phone': obj.gallery.phone,
+                'address': obj.gallery.address,
+                'email': obj.gallery.email,
+            }
+        return None
     
     class Meta:
         model = User
         fields = [
             'id', 'username', 'email', 'first_name', 'last_name', 'full_name',
-            'phone', 'emergency_contact', 'job_title', 'role', 'role_display', 'gallery_name',
+            'phone', 'emergency_contact', 'job_title', 'role', 'role_display', 
+            'gallery', 'gallery_name',
             'can_manage_clients', 'can_manage_artworks', 'can_export_data',
             'can_send_messages', 'can_view_reports', 'can_manage_users',
             'can_manage_gallery_settings', 'timezone_setting', 'language',

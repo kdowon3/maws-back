@@ -198,3 +198,66 @@ def check_admin_permission(request):
             'is_active': request.user.is_active
         }
     })
+
+
+class AdminSMSLogsAPI(APIView):
+    """SMS 발송 로그 관리 API (관리자 전용)"""
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        """SMS 발송 이력 및 실패 상세 조회"""
+        if not request.user.is_superuser:
+            return Response({
+                'error': 'Admin access required',
+                'timestamp': timezone.now().isoformat()
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        try:
+            from sms.models import SMSMessage, SMSDelivery
+            
+            # 최근 SMS 메시지들 조회
+            messages = SMSMessage.objects.all().order_by('-created_at')[:50]
+            
+            logs_data = []
+            for msg in messages:
+                # 실패한 전송들 조회
+                failed_deliveries = SMSDelivery.objects.filter(
+                    message=msg, 
+                    status='failed'
+                ).select_related('client')
+                
+                failed_details = []
+                for delivery in failed_deliveries:
+                    failed_details.append({
+                        'client_name': delivery.client.name,
+                        'phone': delivery.phone_number,
+                        'error': delivery.error_message,
+                        'attempted_at': delivery.created_at.isoformat()
+                    })
+                
+                logs_data.append({
+                    'message_id': msg.id,
+                    'created_at': msg.created_at.isoformat(),
+                    'sender': msg.sender.username,
+                    'gallery': msg.gallery.name,
+                    'message_template': msg.message_template[:100] + '...' if len(msg.message_template) > 100 else msg.message_template,
+                    'total_count': msg.recipients_count,
+                    'sent_count': msg.sent_count,
+                    'failed_count': msg.failed_count,
+                    'status': msg.status,
+                    'failed_details': failed_details
+                })
+            
+            return Response({
+                'sms_logs': logs_data,
+                'total_logs': len(logs_data),
+                'timestamp': timezone.now().isoformat()
+            })
+            
+        except Exception as e:
+            logger.error(f"SMS logs error: {e}")
+            return Response({
+                'error': 'Failed to fetch SMS logs',
+                'message': str(e),
+                'timestamp': timezone.now().isoformat()
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
