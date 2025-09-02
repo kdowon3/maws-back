@@ -330,11 +330,28 @@ class GallerySerializer(serializers.ModelSerializer):
     subscription_active = serializers.BooleanField(source='is_subscription_active', read_only=True)
     can_add_user = serializers.BooleanField(read_only=True)
     
+    def to_representation(self, instance):
+        """직렬화 시 로고 URL 디버깅"""
+        data = super().to_representation(instance)
+        
+        # 로고 URL 디버깅
+        if instance.logo:
+            print(f"[DEBUG] Gallery {instance.id} logo field: {instance.logo}")
+            print(f"[DEBUG] Gallery {instance.id} logo.name: {instance.logo.name}")
+            print(f"[DEBUG] Gallery {instance.id} logo.url: {instance.logo.url}")
+            data['logo'] = instance.logo.url
+        else:
+            print(f"[DEBUG] Gallery {instance.id} has no logo")
+            data['logo'] = None
+            
+        print(f"[DEBUG] Final logo URL: {data.get('logo')}")
+        return data
+    
     class Meta:
         model = Gallery
         fields = [
             'id', 'name', 'business_number', 'address', 'phone', 
-            'email', 'website', 'max_users', 'user_count', 
+            'email', 'website', 'logo', 'max_users', 'user_count', 
             'subscription_active', 'can_add_user', 'created_at'
         ]
         read_only_fields = [

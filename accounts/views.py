@@ -2,6 +2,7 @@ from rest_framework import status, generics, permissions
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import TokenError, InvalidToken
@@ -191,13 +192,26 @@ class LoginHistoryView(generics.ListAPIView):
         ).order_by('-login_time')
 
 
-class GalleryInfoView(generics.RetrieveAPIView):
-    """갤러리 정보 조회 뷰"""
+class GalleryInfoView(generics.RetrieveUpdateAPIView):
+    """갤러리 정보 조회/수정 뷰"""
     serializer_class = GallerySerializer
     permission_classes = [permissions.IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
     
     def get_object(self):
         return self.request.user.gallery
+    
+    def update(self, request, *args, **kwargs):
+        """갤러리 정보 수정 (owner, manager만 가능)"""
+        user = request.user
+        
+        # 권한 확인: owner 또는 manager만 수정 가능
+        if user.role not in ['owner', 'manager']:
+            return Response({
+                'error': '갤러리 정보를 수정할 권한이 없습니다.'
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        return super().update(request, *args, **kwargs)
 
 
 class GalleryUsersView(generics.ListAPIView):

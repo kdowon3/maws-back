@@ -19,6 +19,7 @@ class Gallery(models.Model):
     phone = models.CharField(max_length=20, verbose_name="전화번호")
     email = models.EmailField(verbose_name="대표 이메일")
     website = models.URLField(blank=True, verbose_name="웹사이트")
+    logo = models.ImageField(upload_to='gallery_logos/', blank=True, null=True, verbose_name="갤러리 로고")
     
     # 가입 관리
     registration_code = models.CharField(max_length=20, unique=True, blank=True, null=True, verbose_name="가입 코드")
