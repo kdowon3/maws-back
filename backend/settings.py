@@ -226,6 +226,16 @@ STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 # STATICFILES_STORAGE = "api.storages.StaticStorage"  # 운영 환경에서만 사용
 
+# Media files (User uploaded files) - S3 사용
+STORAGES = {
+    "default": {
+        "BACKEND": "api.storages.MediaStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+    },
+}
+
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
